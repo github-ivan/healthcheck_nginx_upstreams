@@ -1,8 +1,8 @@
 diff --git a/src/http/ngx_http_upstream.c b/src/http/ngx_http_upstream.c
-index dc2d0c0..11c8eed 100644
+index 8f1ee42..6b4c42d 100644
 --- a/src/http/ngx_http_upstream.c
 +++ b/src/http/ngx_http_upstream.c
-@@ -4267,6 +4267,17 @@ ngx_http_upstream_add(ngx_conf_t *cf, ngx_url_t *u, ngx_uint_t flags)
+@@ -4255,6 +4255,17 @@ ngx_http_upstream_add(ngx_conf_t *cf, ngx_url_t *u, ngx_uint_t flags)
      uscf->line = cf->conf_file->line;
      uscf->port = u->port;
      uscf->default_port = u->default_port;
@@ -50,7 +50,7 @@ index 01e2e1e..72a16ca 100644
      ngx_str_t                        host;
      u_char                          *file_name;
 diff --git a/src/http/ngx_http_upstream_round_robin.c b/src/http/ngx_http_upstream_round_robin.c
-index 52bd808..a143fe6 100644
+index 52bd808..8418210 100644
 --- a/src/http/ngx_http_upstream_round_robin.c
 +++ b/src/http/ngx_http_upstream_round_robin.c
 @@ -4,6 +4,8 @@
@@ -103,16 +103,18 @@ index 52bd808..a143fe6 100644
  
      ngx_log_debug1(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                     "get rr peer, try: %ui", pc->tries);
-@@ -410,7 +423,7 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
+@@ -410,7 +423,9 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
              i = pc->tries;
  
              for ( ;; ) {
 -                rrp->current = ngx_http_upstream_get_peer(rrp->peers);
 +                rrp->current = ngx_http_upstream_get_peer(rrp->peers, pc->log);
++		if (rrp->current == UINT_MAX)
++		    goto failed;
  
                  ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                                 "get rr peer, current: %ui %i",
-@@ -471,7 +484,11 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
+@@ -471,7 +486,11 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
  
                      peer = &rrp->peers->peer[rrp->current];
  
@@ -125,7 +127,7 @@ index 52bd808..a143fe6 100644
  
                          if (peer->max_fails == 0
                              || peer->fails < peer->max_fails)
-@@ -576,12 +593,14 @@ failed:
+@@ -576,12 +595,14 @@ failed:
  
  
  static ngx_uint_t
@@ -141,24 +143,26 @@ index 52bd808..a143fe6 100644
  
      for ( ;; ) {
  
-@@ -601,6 +620,11 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
-                     continue;
-                 }
+@@ -591,6 +612,11 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
+                 continue;
+             }
  
-+                if (health_check_rounds && ngx_http_healthcheck_is_down(
-+                        peer[i].health_index,
-+                        log))
-+                    continue;
++	    if (ngx_http_healthcheck_is_down(
++		    peer[i].health_index,
++		    log))
++		continue;
 +
-                 if (peer[n].current_weight * 1000 / peer[i].current_weight
-                     > peer[n].weight * 1000 / peer[i].weight)
-                 {
-@@ -617,6 +641,9 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
+             n = i;
+ 
+             while (i < peers->number - 1) {
+@@ -617,6 +643,11 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
              return n;
          }
  
 +        if (health_check_rounds)
 +            --health_check_rounds;
++	else
++	    return UINT_MAX;
 +
          for (i = 0; i < peers->number; i++) {
              peer[i].current_weight = peer[i].weight;
