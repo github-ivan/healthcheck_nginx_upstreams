@@ -50,7 +50,7 @@ index 01e2e1e..72a16ca 100644
      ngx_str_t                        host;
      u_char                          *file_name;
 diff --git a/src/http/ngx_http_upstream_round_robin.c b/src/http/ngx_http_upstream_round_robin.c
-index 52bd808..8418210 100644
+index 52bd808..cb9c0a3 100644
 --- a/src/http/ngx_http_upstream_round_robin.c
 +++ b/src/http/ngx_http_upstream_round_robin.c
 @@ -4,6 +4,8 @@
@@ -99,35 +99,38 @@ index 52bd808..8418210 100644
      ngx_connection_t              *c;
      ngx_http_upstream_rr_peer_t   *peer;
      ngx_http_upstream_rr_peers_t  *peers;
-+    ngx_int_t                      healthy;
++    ngx_int_t                      is_down;
  
      ngx_log_debug1(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                     "get rr peer, try: %ui", pc->tries);
-@@ -410,7 +423,9 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
+@@ -410,7 +423,12 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
              i = pc->tries;
  
              for ( ;; ) {
 -                rrp->current = ngx_http_upstream_get_peer(rrp->peers);
 +                rrp->current = ngx_http_upstream_get_peer(rrp->peers, pc->log);
-+		if (rrp->current == UINT_MAX)
++		if (rrp->current == UINT_MAX) {
++		    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
++				  "upstream error. all backend is down");
 +		    goto failed;
++		}
  
                  ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                                 "get rr peer, current: %ui %i",
-@@ -471,7 +486,11 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
+@@ -471,7 +489,11 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
  
                      peer = &rrp->peers->peer[rrp->current];
  
 -                    if (!peer->down) {
-+                    healthy = !ngx_http_healthcheck_is_down(
++                    is_down = ngx_http_healthcheck_is_down(
 +                                peer->health_index,
 +                                pc->log);
 +
-+                    if ((!peer->down) && healthy) {
++                    if ((!peer->down) && (!is_down)) {
  
                          if (peer->max_fails == 0
                              || peer->fails < peer->max_fails)
-@@ -576,12 +595,14 @@ failed:
+@@ -576,12 +598,14 @@ failed:
  
  
  static ngx_uint_t
@@ -143,7 +146,7 @@ index 52bd808..8418210 100644
  
      for ( ;; ) {
  
-@@ -591,6 +612,11 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
+@@ -591,6 +615,11 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
                  continue;
              }
  
@@ -155,7 +158,35 @@ index 52bd808..8418210 100644
              n = i;
  
              while (i < peers->number - 1) {
-@@ -617,6 +643,11 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
+@@ -601,22 +630,36 @@ ngx_http_upstream_get_peer(ngx_http_upstream_rr_peers_t *peers)
+                     continue;
+                 }
+ 
++		if (ngx_http_healthcheck_is_down(
++			    peer[i].health_index,
++			    log))
++		    continue;
++
+                 if (peer[n].current_weight * 1000 / peer[i].current_weight
+                     > peer[n].weight * 1000 / peer[i].weight)
+                 {
+-                    return n;
++		    return n;
+                 }
+ 
+                 n = i;
+             }
+ 
+-            if (peer[i].current_weight > 0) {
+-                n = i;
++            if ((peer[i].current_weight > 0)
++		&& (! ngx_http_healthcheck_is_down(
++			peer[i].health_index,
++			log))
++	    ) {
++                return i;
+             }
+ 
              return n;
          }
  
